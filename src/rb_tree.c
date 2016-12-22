@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <arpa/inet.h>
 #include "rb_tree.h"
 
 /*check node color function*/
@@ -160,11 +161,16 @@ void rb_print( struct rb_node *node ) {
 }
 
 
+struct addr_in addr;
 static void rb_fileprint(struct rb_node *node,  FILE *fp) {
 	if (node == NULL) return;
 
+
 	rb_fileprint(node->link[0], fp);
-	fprintf(fp,"%d:%d\n", node->ip_addr, node->ip_cnt);
+
+	addr.addr_in = node->ip_addr;
+
+	fprintf(fp,"%d:%d\n", inet_ntoa(addr), node->ip_cnt);			//change
 	rb_fileprint(node->link[1], fp);
 }
 void rb_savetofile(char *fname, struct rb_tree tree) {
@@ -187,7 +193,8 @@ static int strto_rbnode(char *strnode, int maxsize, int *ip, int *ip_cnt) {
 		*str_cnt = '\0';
 		 str_cnt++;
 
-		*ip = atoi(str_ip);
+		//*ip = atoi(str_ip);
+		*ip = inet_aton(str_ip);
 		*ip_cnt = atoi(str_cnt);
 		return 1;
 	}

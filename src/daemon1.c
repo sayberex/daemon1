@@ -1,5 +1,4 @@
-#define _GNU_SOURCE
-
+#define _GNU_SOURCES
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -26,6 +25,8 @@
 #include "rb_tree.h"
 
 #define	DEBUG
+
+struct rb_tree	stat_tree;
 
 
 int 	net_createsocket(int *socketfd);
@@ -100,7 +101,7 @@ void load_stat(struct rb_tree *tree) {
 
 	if (stat("/etc/daemon1/stat", &st) == -1) {
 		if (mkdir("/etc/daemon1/stat",0777) == -1) {
-			//puts("can't create directory /etc/daemon1/stat");
+			Log_Write("can't create directory /etc/daemon1/stat");
 			return;
 		}
 	}
@@ -120,7 +121,7 @@ void save_stat(struct rb_tree tree){
 
 	if (stat("/etc/daemon1/stat", &st) == -1) {
 		if (mkdir("/etc/daemon1/stat",0777) == -1) {
-			//puts("can't create directory /etc/daemon1/stat");
+			Log_Write("can't create directory /etc/daemon1/stat");
 			return;
 		}
 	} else {
@@ -183,31 +184,6 @@ int GetPIDFromFile(void) {
 /*-----------------------------------------------------------------------------------*/
 
 //wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
-/*-----------------------------------------------------------------------------------*/
-void Parse_ShowUsage(void) {
-	puts("Daemon usage");
-	puts("start                - start sniff packets from default interface");
-	puts("stop                 - stop sniff packets");
-	puts("show [ip] count      - print number of packets received from ip address");
-	puts("select iface [iface] - select interface for sniffing(eth0, wlan0 ...)");
-	puts("stat [iface]         - show statistics of particular interface, if iface ommited - for all interfaces");
-	puts("--help               - show usage information");
-}
-
-void Parse_Cmd(int argc, char *argv[]) {
-	if (argc > 1) {
-		if		(strcmp(argv[1],"start") == 0)	{puts("cmd start");}
-		else if	(strcmp(argv[1],"stop") == 0)	{puts("cmd stop");}
-		else if	(strcmp(argv[1],"show") == 0)	{puts("cmd show");}
-		else if	(strcmp(argv[1],"select") == 0)	{puts("cmd select");}
-		else if	(strcmp(argv[1],"stat") == 0)	{puts("cmd stat");}
-		else if	(strcmp(argv[1],"--help") == 0)
-			Parse_ShowUsage();
-	}
-	//else
-	//	Parse_ShowUsage();
-}
-/*-----------------------------------------------------------------------------------*/
 
 
 /*-----------------------------------------------------------------------------------*/
@@ -232,8 +208,8 @@ int	cmd_term	= 0;
 int	cmd_start	= 0;
 int	cmd_stop	= 0;
 int cmd_reply   = 0;
-int cmd_show_ip_stats = 0;
-int cmd_show_if_stats = 0;
+int cmd_show_ip_stats = 0;		int cmd_show_ip_stats_ip = 0;
+int cmd_show_if_stats = 0;		char cmd_show_if_stats_ifname[20];
 int cmd_show_if_all_stats = 0;
 
 inline void cmd_clear(void) {
@@ -247,14 +223,25 @@ inline void cmd_clear(void) {
 }
 
 void cmd_parse(char *cmd) {
+	char *pch;
+
 	if (strncmp(cmd, CMD_TERM,  sizeof(CMD_TERM))  == 0)	cmd_term  = 1;
 	if (strncmp(cmd, CMD_REPLY, sizeof(CMD_REPLY)) == 0)	cmd_reply = 1;
 	if (strncmp(cmd, CMD_START, sizeof(CMD_START)) == 0)	cmd_start = 1;
 	if (strncmp(cmd, CMD_STOP,  sizeof(CMD_STOP))  == 0)	cmd_stop  = 1;
+	if (strncmp(cmd, CMD_SHOW_IF_ALL_STATS,  sizeof(CMD_SHOW_IF_ALL_STATS))  == 0) cmd_show_if_all_stats  = 1;
 
-	if (strchr(cmd,':')) {
-		if (strncmp(cmd, CMD_STOP,  sizeof(CMD_STOP))  == 0) {
-			cmd_stop  = 1;
+
+	if (( pch = strchr(cmd,':')) != NULL) {
+		*pch = '\0';
+
+		if (strncmp(cmd, CMD_SHOW_IP_STATS,  sizeof(CMD_SHOW_IP_STATS))  == 0) {
+			cmd_show_ip_stats_ip = atoi(++pch);
+			cmd_show_ip_stats  = 1;
+		}
+		if (strncmp(cmd, CMD_SHOW_IF_STATS,  sizeof(CMD_SHOW_IF_STATS))  == 0) {
+			strcpy(cmd_show_if_stats_ifname, ++pch);
+			cmd_show_if_stats  = 1;
 		}
 	}
 }
@@ -325,6 +312,12 @@ void *cmd_thread(void *args) {
 			if ((rc > 0) && (rc < sizeof(buffer)))
 				cmd_parse(buffer);
 
+
+
+
+
+
+
 			//process commands
 			if (cmd_reply) {
 				//char mystr[] = "TER2M";
@@ -339,6 +332,56 @@ void *cmd_thread(void *args) {
 					break;
 				}
 			}
+
+
+			char	snd_str[64];
+			if (cmd_start) {
+				scan_start();
+				sprintf(snd_str, "start scan on iface = %s", iface_name);
+				send(sd2, snd_str, strlen(snd_str), 0);
+			}
+
+			if (cmd_stop) {
+				scan_stop();
+				sprintf(snd_str, "accepted STOP  CMD");
+				send(sd2, snd_str, strlen(snd_str), 0);
+			}
+
+			if (cmd_show_ip_stats) {
+				sprintf(snd_str, "accepted SHOW IP STATS CMD WITH IP = %d", cmd_show_ip_stats_ip);
+				send(sd2, snd_str, strlen(snd_str), 0);
+
+				struct rb_node node;
+				if (rb_find(stat_tree, &node, cmd_show_ip_stats_ip)) {
+					struct in_addr addr;
+					addr.s_addr = node.ip_addr;
+					sprintf(snd_str,"STATISTICS FOR %15s = [%u]", inet_ntoa(addr), node.ip_cnt);
+				}
+
+			}
+
+			if (cmd_show_if_stats) {
+				sprintf(snd_str, "accepted SHOW IF STATS CMD WITH IF = %s", cmd_show_if_stats_ifname);
+				send(sd2, snd_str, strlen(snd_str), 0);
+			}
+
+			if (cmd_show_if_all_stats) {
+				sprintf(snd_str, "accepted SHOW IF_ALL STATS CMD");
+				send(sd2, snd_str, strlen(snd_str), 0);
+			}
+
+
+			/*int	cmd_term	= 0;
+			int	cmd_start	= 0;
+			int	cmd_stop	= 0;
+			int cmd_reply   = 0;
+			int cmd_show_ip_stats = 0;		int cmd_show_ip_stats_ip = 0;
+			int cmd_show_if_stats = 0;		char cmd_show_if_stats_ifname[20];
+			int cmd_show_if_all_stats = 0;*/
+
+
+
+
 			//process commands
 			cmd_clear();
 			close(sd2);
@@ -472,23 +515,110 @@ void cmd_snd_daemon(char *cmd, int isReply) {
 }
 /*-----------------------------------------------------------------------------------*/
 
-struct rb_tree	stat_tree;
+//struct rb_tree	stat_tree;
+
+
+/*-----------------------------------------------------------------------------------*/
+void Parse_ShowUsage(void) {
+	puts("Daemon usage");
+	puts("start                - start sniff packets from default interface");
+	puts("stop                 - stop sniff packets");
+	puts("show [ip] count      - print number of packets received from ip address");
+	puts("select iface [iface] - select interface for sniffing(eth0, wlan0 ...)");
+	puts("stat [iface]         - show statistics of particular interface, if iface ommited - for all interfaces");
+	puts("--help               - show usage information");
+}
+
+void Parse_Cmd(int argc, char *argv[], char *cmd) {
+	if (argc > 1) {
+		//puts(argv[1]);
+		//puts(argv[2]);
+		//puts(argv[3]);
+		if	(strcmp(argv[1],"term") == 0)	{strcpy(cmd,CMD_TERM);}
+		if	(strcmp(argv[1],"start") == 0)	{strcpy(cmd,CMD_START);}
+		if	(strcmp(argv[1],"stop") == 0)	{strcpy(cmd,CMD_STOP);}
+
+		if	((strcmp(argv[1],"show") == 0) && (strcmp(argv[3],"count") == 0))	{
+			char *ipaddr = argv[2];
+			if (strlen(ipaddr) > 0) {
+				ipaddr++;
+				ipaddr[strlen(ipaddr)-1] = '\0';
+				strcpy(cmd,CMD_SHOW_IP_STATS);
+				strcat(cmd, ":");
+				strcat(cmd, ipaddr);
+				puts(cmd);
+				cmd[0] = '\0';
+			}
+		}
+
+		if	((strcmp(argv[1],"select") == 0) && (strcmp(argv[2],"iface") == 0)){
+			char *ifname = argv[3];
+			if (strlen(ifname) > 0) {
+				ifname++;
+				ifname[strlen(ifname) - 1] = '\0';
+				save_cfg(ifname);
+				exit(0);
+			}
+		}
+
+		//else if	(strcmp(argv[1],"stat") == 0)	{puts("cmd stat");}
+
+
+		else if	(strcmp(argv[1],"--help") == 0) {
+			Parse_ShowUsage();
+			exit(0);
+		}
+	}
+	//else
+	//	Parse_ShowUsage();
+}
+/*-----------------------------------------------------------------------------------*/
+
+
+
 /*-----------------------------------------------------------------------------------*/
 int main(int argc, char *argv[]) {
 	int pid;
 	int isDaemonRun = 0;
+	struct stat st = {0};
+	char	daemon_cmd[64];
+
+	memset(daemon_cmd,0,64);
+
+	Parse_Cmd(argc, argv, daemon_cmd);
+
+	//if (strlen(daemon_cmd) > 0) puts(daemon_cmd);
+	//return 0;
+
+
+	//start daemon directory folder structure if still not created
+	if (stat("/etc/daemon1", &st) == -1) {
+		if (mkdir("/etc/daemon1",0777) == -1) {
+			perror("can't create directory /etc/daemon1");
+			return -1;
+		}
+	}
+	if (stat("/etc/daemon1/stat", &st) == -1) {
+		if (mkdir("/etc/daemon1/stat",0777) == -1) {
+			perror("can't create directory /etc/daemon1/stat");
+			return -1;
+		}
+	}
+
+
+
 
 	//Parse_Cmd(argc, argv);
 
 
 
-	scan_start();
+	/*scan_start();
 	sleep(10);
 	rb_print(stat_tree.root);
 	scan_stop();
 	sleep(5);
 	puts("finita");
-	return 0;
+	return 0;*/
 
 
 
@@ -558,13 +688,35 @@ int main(int argc, char *argv[]) {
 	//parent process
 
 
-	char mycmd[] = "REPLY";
-	cmd_snd_daemon(mycmd,1);
 
-	if (strcmp(mycmd,"REPLY")==0) {
+/*#define	CMD_START	"START"
+#define CMD_STOP	"STOP"
+#define CMD_TERM	"TERM"
+#define CMD_REPLY	"REPLY"
 
-	}
-	//sleep(3);
+#define CMD_SHOW_IP_STATS "SHOW IP STATS"
+#define CMD_SHOW_IF_STATS "SHOW IF STATS"
+#define CMD_SHOW_IF_ALL_STATS "SHOW IF ALL STATS"*/
+
+
+	//inet_aton();
+	//char mycmd[64];
+	//sprintf(mycmd,"%s", CMD_START);
+	//sprintf(mycmd,"%s", CMD_STOP);
+	//sprintf(mycmd,"%s", CMD_TERM);
+	//sprintf(mycmd,"%s", CMD_REPLY);
+
+	//sprintf(mycmd,"%s:%d", CMD_SHOW_IP_STATS, 12345);
+	//sprintf(mycmd,"%s:%s", CMD_SHOW_IF_STATS, "wlan1");
+	//sprintf(mycmd,"%s", CMD_SHOW_IF_ALL_STATS);
+
+	//cmd_snd_daemon(mycmd,1);
+
+
+	if (strlen(daemon_cmd) > 0) cmd_snd_daemon(daemon_cmd, 1);
+
+	//if (strcmp(mycmd,"REPLY")==0) {}
+	sleep(3);
 
 
 	//parent process
@@ -723,6 +875,7 @@ void *scan_thread(void *args) {
 	int sd;
 
 	//clear tree data
+	Log_Write("Thread created");
 	rb_clear(&stat_tree);
 
 	//read config from file to determine iface name
@@ -736,7 +889,7 @@ void *scan_thread(void *args) {
 
 	//create socket for sniffing
 	if (net_createsocket(&sd)) {
-
+		Log_Write("scan packets run");
 		for(;;) {
 			scan_packets(sd);
 		}
