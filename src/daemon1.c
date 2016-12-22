@@ -22,12 +22,17 @@
 #include <arpa/inet.h>
 //#include <poll.h>
 
+#include <dirent.h>
+
 #include "rb_tree.h"
 
 #define	DEBUG
 
 struct rb_tree	stat_tree;
 
+
+void stat_print_file(char *fpath);
+void stat_print_all(char *path);
 
 int 	net_createsocket(int *socketfd);
 //void	scan_packets(int socketfd, );
@@ -199,6 +204,7 @@ int GetPIDFromFile(void) {
 #define CMD_STOP	"STOP"
 #define CMD_TERM	"TERM"
 #define CMD_REPLY	"REPLY"
+#define CMD_STAT	"STAT"
 
 #define CMD_SHOW_IP_STATS "SHOW IP STATS"
 #define CMD_SHOW_IF_STATS "SHOW IF STATS"
@@ -211,6 +217,7 @@ int cmd_reply   = 0;
 int cmd_show_ip_stats = 0;		int cmd_show_ip_stats_ip = 0;
 int cmd_show_if_stats = 0;		char cmd_show_if_stats_ifname[20];
 int cmd_show_if_all_stats = 0;
+int	cmd_stat = 0;
 
 inline void cmd_clear(void) {
 	//clear all commands except term
@@ -220,29 +227,34 @@ inline void cmd_clear(void) {
 	cmd_show_ip_stats		= 0;
 	cmd_show_if_stats		= 0;
 	cmd_show_if_all_stats	= 0;
+	cmd_stat 				= 0;
 }
 
 void cmd_parse(char *cmd) {
 	char *pch;
+	static struct in_addr addr;
 
 	if (strncmp(cmd, CMD_TERM,  sizeof(CMD_TERM))  == 0)	cmd_term  = 1;
 	if (strncmp(cmd, CMD_REPLY, sizeof(CMD_REPLY)) == 0)	cmd_reply = 1;
 	if (strncmp(cmd, CMD_START, sizeof(CMD_START)) == 0)	cmd_start = 1;
 	if (strncmp(cmd, CMD_STOP,  sizeof(CMD_STOP))  == 0)	cmd_stop  = 1;
 	if (strncmp(cmd, CMD_SHOW_IF_ALL_STATS,  sizeof(CMD_SHOW_IF_ALL_STATS))  == 0) cmd_show_if_all_stats  = 1;
+	if (strncmp(cmd, CMD_STAT,  sizeof(CMD_STAT))  == 0)	cmd_stat  = 1;
 
 
 	if (( pch = strchr(cmd,':')) != NULL) {
-		*pch = '\0';
+		//*pch = '\0';
 
-		if (strncmp(cmd, CMD_SHOW_IP_STATS,  sizeof(CMD_SHOW_IP_STATS))  == 0) {
-			cmd_show_ip_stats_ip = atoi(++pch);
+		if (strncmp(cmd, CMD_SHOW_IP_STATS,  sizeof(CMD_SHOW_IP_STATS)-1)  == 0) {
+			inet_aton(++pch, &addr);
+			//cmd_show_ip_stats_ip = atoi(++pch);
+			cmd_show_ip_stats_ip = addr.s_addr;
 			cmd_show_ip_stats  = 1;
 		}
-		if (strncmp(cmd, CMD_SHOW_IF_STATS,  sizeof(CMD_SHOW_IF_STATS))  == 0) {
-			strcpy(cmd_show_if_stats_ifname, ++pch);
-			cmd_show_if_stats  = 1;
-		}
+		//if (strncmp(cmd, CMD_SHOW_IF_STATS,  sizeof(CMD_SHOW_IF_STATS))  == 0) {
+		//	strcpy(cmd_show_if_stats_ifname, ++pch);
+		//	cmd_show_if_stats  = 1;
+		//}
 	}
 }
 
@@ -337,7 +349,7 @@ void *cmd_thread(void *args) {
 			char	snd_str[64];
 			if (cmd_start) {
 				scan_start();
-				sprintf(snd_str, "start scan on iface = %s", iface_name);
+				//sprintf(snd_str, "start scan on iface = %s", iface_name);
 				send(sd2, snd_str, strlen(snd_str), 0);
 			}
 
@@ -348,19 +360,29 @@ void *cmd_thread(void *args) {
 			}
 
 			if (cmd_show_ip_stats) {
-				sprintf(snd_str, "accepted SHOW IP STATS CMD WITH IP = %d", cmd_show_ip_stats_ip);
-				send(sd2, snd_str, strlen(snd_str), 0);
+				struct in_addr addr;
+				addr.s_addr = cmd_show_ip_stats_ip;
+				//char str_str
+
+
+				//sprintf(snd_str, "accepted SHOW IP STATS CMD WITH IP = %d = %s", cmd_show_ip_stats_ip, inet_ntoa(addr));
+				//send(sd2, snd_str, strlen(snd_str), 0);
 
 				struct rb_node node;
 				if (rb_find(stat_tree, &node, cmd_show_ip_stats_ip)) {
-					struct in_addr addr;
+					//struct in_addr addr;
 					addr.s_addr = node.ip_addr;
 					sprintf(snd_str,"STATISTICS FOR %15s = [%u]", inet_ntoa(addr), node.ip_cnt);
+					send(sd2, snd_str, strlen(snd_str), 0);
 				}
-
 			}
 
-			if (cmd_show_if_stats) {
+			if (cmd_stat) {
+				send(sd2, CMD_STAT, sizeof(CMD_STAT), 0);
+				save_stat(stat_tree);
+			}
+
+			/*if (cmd_show_if_stats) {
 				sprintf(snd_str, "accepted SHOW IF STATS CMD WITH IF = %s", cmd_show_if_stats_ifname);
 				send(sd2, snd_str, strlen(snd_str), 0);
 			}
@@ -368,7 +390,7 @@ void *cmd_thread(void *args) {
 			if (cmd_show_if_all_stats) {
 				sprintf(snd_str, "accepted SHOW IF_ALL STATS CMD");
 				send(sd2, snd_str, strlen(snd_str), 0);
-			}
+			}*/
 
 
 			/*int	cmd_term	= 0;
@@ -547,7 +569,7 @@ void Parse_Cmd(int argc, char *argv[], char *cmd) {
 				strcat(cmd, ":");
 				strcat(cmd, ipaddr);
 				puts(cmd);
-				cmd[0] = '\0';
+				//cmd[0] = '\0';
 			}
 		}
 
@@ -561,7 +583,7 @@ void Parse_Cmd(int argc, char *argv[], char *cmd) {
 			}
 		}
 
-		//else if	(strcmp(argv[1],"stat") == 0)	{puts("cmd stat");}
+		if	(strcmp(argv[1],"stat") == 0) {strcpy(cmd, CMD_STAT);}
 
 
 		else if	(strcmp(argv[1],"--help") == 0) {
@@ -582,10 +604,14 @@ int main(int argc, char *argv[]) {
 	int isDaemonRun = 0;
 	struct stat st = {0};
 	char	daemon_cmd[64];
+	char	tmp[64];
 
 	memset(daemon_cmd,0,64);
 
 	Parse_Cmd(argc, argv, daemon_cmd);
+
+
+	//cmd_parse("SHOW IP STATS:172.217.20.174");
 
 	//if (strlen(daemon_cmd) > 0) puts(daemon_cmd);
 	//return 0;
@@ -688,17 +714,6 @@ int main(int argc, char *argv[]) {
 	//parent process
 
 
-
-/*#define	CMD_START	"START"
-#define CMD_STOP	"STOP"
-#define CMD_TERM	"TERM"
-#define CMD_REPLY	"REPLY"
-
-#define CMD_SHOW_IP_STATS "SHOW IP STATS"
-#define CMD_SHOW_IF_STATS "SHOW IF STATS"
-#define CMD_SHOW_IF_ALL_STATS "SHOW IF ALL STATS"*/
-
-
 	//inet_aton();
 	//char mycmd[64];
 	//sprintf(mycmd,"%s", CMD_START);
@@ -713,11 +728,30 @@ int main(int argc, char *argv[]) {
 	//cmd_snd_daemon(mycmd,1);
 
 
-	if (strlen(daemon_cmd) > 0) cmd_snd_daemon(daemon_cmd, 1);
+	if (strlen(daemon_cmd) > 0) {
+		cmd_snd_daemon(daemon_cmd, 1);
 
-	//if (strcmp(mycmd,"REPLY")==0) {}
+
+		if (strcmp(daemon_cmd,CMD_STAT) == 0) {
+			if (argc == 2) stat_print_all("/etc/daemon1/stat");
+			if (argc == 3) {
+				if (strlen(argv[2]) > 2) {
+					strcpy(tmp,argv[2]);
+					tmp[strlen(tmp) - 1] = '\0';
+					stat_print_iface("/etc/daemon1/stat", tmp+1);
+					puts(tmp+1);
+				}
+			}
+		}
+	}
+
 	sleep(3);
 
+
+
+
+
+	//stat_print_file("/etc/daemon1/stat/eth0");
 
 	//parent process
 
@@ -725,6 +759,55 @@ int main(int argc, char *argv[]) {
 	return EXIT_SUCCESS;
 }
 /*-----------------------------------------------------------------------------------*/
+
+void stat_print_file(char *fpath) {
+	#define STR_SIZE	250
+	char	str[STR_SIZE];
+
+	FILE	*fp = fopen(fpath, "r");
+	if (fp != NULL) {
+		while (fgets(str, STR_SIZE, fp) != NULL) puts(str);
+		fclose(fp);
+	}
+}
+
+void stat_print_all(char *path) {
+	struct dirent *de;
+	DIR *dir = opendir(path);
+	char filepath[250];
+
+
+	if (dir != NULL) {
+		while ((de = readdir(dir)) != NULL) {
+
+			if (strcmp(de->d_name,".") == 0) continue;
+			if (strcmp(de->d_name,"..") == 0) continue;
+			//puts(de->d_name);
+			printf("\n%s statistics\n------------------------\n", de->d_name);
+
+			strcpy(filepath, path);
+			strcat(filepath,"/");
+			strcat(filepath, de->d_name);
+			stat_print_file(filepath);
+		}
+		closedir(dir);
+	}
+}
+
+void stat_print_iface(char *path, char *ifname) {
+	char filepath[250];
+	FILE	*fp;
+
+	strcpy(filepath, path);
+	strcat(filepath,"/");
+	strcat(filepath, ifname);
+
+	if (!(access(filepath,0) == 0))
+		printf("no statistic on %s interface", ifname);
+	else
+		stat_print_file(filepath);
+
+}
 
 
 /*-----------------------------------------------------------------------------------*/

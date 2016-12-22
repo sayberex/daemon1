@@ -161,16 +161,19 @@ void rb_print( struct rb_node *node ) {
 }
 
 
-struct addr_in addr;
+
 static void rb_fileprint(struct rb_node *node,  FILE *fp) {
 	if (node == NULL) return;
+	static struct in_addr addr;
 
 
 	rb_fileprint(node->link[0], fp);
 
-	addr.addr_in = node->ip_addr;
 
-	fprintf(fp,"%d:%d\n", inet_ntoa(addr), node->ip_cnt);			//change
+
+	addr.s_addr = node->ip_addr;
+
+	fprintf(fp,"%s:%d\n", inet_ntoa(addr), node->ip_cnt);			//change
 	rb_fileprint(node->link[1], fp);
 }
 void rb_savetofile(char *fname, struct rb_tree tree) {
@@ -187,6 +190,7 @@ void rb_savetofile(char *fname, struct rb_tree tree) {
 static int strto_rbnode(char *strnode, int maxsize, int *ip, int *ip_cnt) {
 	char	*str_ip;
 	char	*str_cnt;
+	static struct in_addr addr;
 
 	str_ip = strnode;
 	if ((str_cnt = strchr(strnode,':')) != NULL) {
@@ -194,7 +198,8 @@ static int strto_rbnode(char *strnode, int maxsize, int *ip, int *ip_cnt) {
 		 str_cnt++;
 
 		//*ip = atoi(str_ip);
-		*ip = inet_aton(str_ip);
+		inet_aton(str_ip, &addr);
+		*ip = addr.s_addr;
 		*ip_cnt = atoi(str_cnt);
 		return 1;
 	}
