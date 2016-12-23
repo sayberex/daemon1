@@ -350,6 +350,7 @@ void *cmd_thread(void *args) {
 			if (cmd_start) {
 				scan_start();
 				//sprintf(snd_str, "start scan on iface = %s", iface_name);
+				sprintf(snd_str, "accepted START  CMD");
 				send(sd2, snd_str, strlen(snd_str), 0);
 			}
 
@@ -557,33 +558,43 @@ void Parse_Cmd(int argc, char *argv[], char *cmd) {
 		//puts(argv[2]);
 		//puts(argv[3]);
 		if	(strcmp(argv[1],"term") == 0)	{strcpy(cmd,CMD_TERM);}
-		if	(strcmp(argv[1],"start") == 0)	{strcpy(cmd,CMD_START);}
-		if	(strcmp(argv[1],"stop") == 0)	{strcpy(cmd,CMD_STOP);}
+		else if	(strcmp(argv[1],"start") == 0)	{strcpy(cmd,CMD_START);}
+		else if	(strcmp(argv[1],"stop") == 0)	{strcpy(cmd,CMD_STOP);}
 
-		if	((strcmp(argv[1],"show") == 0) && (strcmp(argv[3],"count") == 0))	{
+		else if	((strcmp(argv[1],"show") == 0) && (strcmp(argv[3],"count") == 0))	{
 			char *ipaddr = argv[2];
 			if (strlen(ipaddr) > 0) {
-				ipaddr++;
-				ipaddr[strlen(ipaddr)-1] = '\0';
-				strcpy(cmd,CMD_SHOW_IP_STATS);
-				strcat(cmd, ":");
-				strcat(cmd, ipaddr);
+
+				if (ipaddr[0] == '[') {
+					ipaddr++;
+					ipaddr[strlen(ipaddr)-1] = '\0';
+					strcpy(cmd,CMD_SHOW_IP_STATS);
+					strcat(cmd, ":");
+					strcat(cmd, ipaddr);
+				}
+				else {
+					strcpy(cmd,CMD_SHOW_IP_STATS);
+					strcat(cmd, ":");
+					strcat(cmd, ipaddr);
+				}
 				puts(cmd);
 				//cmd[0] = '\0';
 			}
 		}
 
-		if	((strcmp(argv[1],"select") == 0) && (strcmp(argv[2],"iface") == 0)){
+		else if	((strcmp(argv[1],"select") == 0) && (strcmp(argv[2],"iface") == 0)){
 			char *ifname = argv[3];
 			if (strlen(ifname) > 0) {
-				ifname++;
-				ifname[strlen(ifname) - 1] = '\0';
+				if (ifname[0] == '[') {
+					ifname++;
+					ifname[strlen(ifname) - 1] = '\0';
+				}
 				save_cfg(ifname);
 				exit(0);
 			}
 		}
 
-		if	(strcmp(argv[1],"stat") == 0) {strcpy(cmd, CMD_STAT);}
+		else if	(strcmp(argv[1],"stat") == 0) {strcpy(cmd, CMD_STAT);}
 
 
 		else if	(strcmp(argv[1],"--help") == 0) {
@@ -729,23 +740,31 @@ int main(int argc, char *argv[]) {
 
 
 	if (strlen(daemon_cmd) > 0) {
+		printf("cmd to send = %s\n", daemon_cmd);
 		cmd_snd_daemon(daemon_cmd, 1);
 
 
 		if (strcmp(daemon_cmd,CMD_STAT) == 0) {
 			if (argc == 2) stat_print_all("/etc/daemon1/stat");
 			if (argc == 3) {
-				if (strlen(argv[2]) > 2) {
+				if (strlen(argv[2]) > 0) {
 					strcpy(tmp,argv[2]);
-					tmp[strlen(tmp) - 1] = '\0';
-					stat_print_iface("/etc/daemon1/stat", tmp+1);
-					puts(tmp+1);
+					if (tmp[0] == '[') {
+						tmp[strlen(tmp) - 1] = '\0';
+						stat_print_iface("/etc/daemon1/stat", tmp+1);
+						puts(tmp+1);
+					}
+					else {
+						stat_print_iface("/etc/daemon1/stat", tmp);
+						puts(tmp);
+					}
+
 				}
 			}
 		}
 	}
 
-	sleep(3);
+	//sleep(3);
 
 
 
@@ -811,17 +830,66 @@ void stat_print_iface(char *path, char *ifname) {
 
 
 /*-----------------------------------------------------------------------------------*/
-int DaemonProc(void) {
-	int		pid;
-	int		status;
-	int		need_start;
+int fterminate = 0;
+/*void sig_proc(int sig) {
+	fterminate = 1;
+	Log_Write("signal accepted");
+}*/
 
-	sigset_t	sigset;
-	siginfo_t	siginfo;
+void sig_proc(int sig, siginfo_t *siginfo, void *context) {
+	fterminate = 1;
+	Log_Write("signal accepted");
+}
+
+
+//void (*sa_sigaction) (int i, siginfo_t *si, void *pv);
+
+int DaemonProc(void) {
+	//int		pid;
+	//int		status;
+	//int		need_start;
+
+
+	//int			signo;
+	//int			status;
+
+
+	struct sigaction	sigact;
+	sigact.sa_sigaction = sig_proc;
+	sigact.sa_flags = SA_SIGINFO;
+
+	//sigemptyset(&sigact.sa_mask);
+
+
+	sigaddset(&sigact.sa_mask, SIGQUIT);	//Terminate by user signal
+
+
+	//sigaddset(&sigact.sa_mask, SIGINT);		//Terminate by user from terminal
+	//sigaddset(&sigact.sa_mask, SIGTERM);	//Terminate request signal
+	sigprocmask(SIGQUIT, &sigact.sa_mask, NULL);
+
+	sigaction(SIGQUIT, &sigact, 0);
+	//sigaction(SIGINT,  &sigaction, 0);
+	//sigaction(SIGTERM, &sigaction, 0);
+
+
+	//sigset_t	sigset;
+	//sigemtyset(&sigset);
+
+	//sigaddset(&sigset, SIGQUIT);	//Terminate by user signal
+	//sigaddset(&sigset, SIGINT);		//Terminate by user from terminal
+	//sigaddset(&sigset, SIGTERM);	//Terminate request signal
+	//sigaddset(&sigset, SIGCHLD);	//Received when child process status changed
+
+	//sigact.sa_mask = sigset;
+
+
+	//sigset_t	sigset;
+	//siginfo_t	siginfo;
 
 
 	//WWWWWWWWWWWWWWWWWWWWWWW Don't forget describe critical signal handlers
-	sigemptyset(&sigset);
+	/*sigemptyset(&sigset);
 
 	sigaddset(&sigset, SIGQUIT);	//Terminate by user signal
 	sigaddset(&sigset, SIGINT);		//Terminate by user from terminal
@@ -829,7 +897,11 @@ int DaemonProc(void) {
 	sigaddset(&sigset, SIGCHLD);	//Received when child process status changed
 
 	sigaddset(&sigset, SIGUSR1);	//User defined signal that we will use for config update
-	sigprocmask(SIG_BLOCK, &sigset, NULL);
+	sigprocmask(SIG_BLOCK, &sigset, NULL);*/
+
+
+
+
 
 	Log_Write("daemon started");
 	SetPIDFile();
